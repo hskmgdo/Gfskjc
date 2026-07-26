@@ -3,27 +3,23 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, C
 import sqlite3
 import json
 import random
-import string
 import time
 import logging
-import threading
-import requests
 import base64
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # ==================== تنظیمات اولیه ====================
-BOT_TOKEN = "8423981755:AAFaEYzOefEaxDiuyvKKyyTJzlhDXWSqyRw"  # توکن ربات شما
-ADMIN_IDS = [8916314219]  # آیدی عددی شما
-SUPPORT_CHANNEL = "@rezagrootz"  # کانال پشتیبانی
-BOT_USERNAME = "REZA_GROOTZ_BOT"  # یوزرنیم ربات
+BOT_TOKEN = "8423981755:AAFaEYzOefEaxDiuyvKKyyTJzlhDXWSqyRw"
+ADMIN_IDS = [8916314219]
+SUPPORT_LINK = "https://t.me/rezagrootz"
 
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode='HTML')
 logger = logging.getLogger(__name__)
 
-# ==================== دیتابیس پیشرفته ====================
+# ==================== دیتابیس ====================
 class Database:
     def __init__(self):
-        self.conn = sqlite3.connect('config_bot.db', check_same_thread=False)
+        self.conn = sqlite3.connect('stormdns_bot.db', check_same_thread=False)
         self.cursor = self.conn.cursor()
         self._create_tables()
         
@@ -33,11 +29,10 @@ class Database:
                 user_id INTEGER PRIMARY KEY,
                 username TEXT,
                 first_name TEXT,
+                language TEXT DEFAULT 'fa',
                 config_count INTEGER DEFAULT 0,
                 join_date INTEGER,
-                last_activity INTEGER,
-                is_premium INTEGER DEFAULT 0,
-                configs TEXT DEFAULT '[]'
+                last_activity INTEGER
             )
         ''')
         self.cursor.execute('''
@@ -46,35 +41,7 @@ class Database:
                 user_id INTEGER,
                 config TEXT,
                 created_at INTEGER,
-                expires_at INTEGER,
-                is_active INTEGER DEFAULT 1,
-                note TEXT
-            )
-        ''')
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS servers (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT,
-                host TEXT,
-                port INTEGER,
-                uuid TEXT,
-                path TEXT,
-                sni TEXT,
-                public_key TEXT,
-                short_id TEXT,
-                type TEXT,
                 is_active INTEGER DEFAULT 1
-            )
-        ''')
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS orders (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                server_id INTEGER,
-                config TEXT,
-                status TEXT DEFAULT 'pending',
-                created_at INTEGER,
-                paid_at INTEGER
             )
         ''')
         self.conn.commit()
@@ -91,129 +58,147 @@ class Database:
         self.cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
         return self.cursor.fetchone()
 
+    def update_language(self, user_id, lang):
+        self.cursor.execute("UPDATE users SET language = ? WHERE user_id = ?", (lang, user_id))
+        self.conn.commit()
+
     def add_config(self, user_id, config):
         now = int(time.time())
-        expires = now + 30 * 86400  # 30 روز اعتبار
         self.cursor.execute(
-            "INSERT INTO configs (user_id, config, created_at, expires_at) VALUES (?, ?, ?, ?)",
-            (user_id, config, now, expires)
+            "INSERT INTO configs (user_id, config, created_at) VALUES (?, ?, ?)",
+            (user_id, config, now)
         )
         self.conn.commit()
         return self.cursor.lastrowid
 
     def get_user_configs(self, user_id):
-        self.cursor.execute("SELECT * FROM configs WHERE user_id = ? AND is_active = 1", (user_id,))
+        self.cursor.execute("SELECT * FROM configs WHERE user_id = ? AND is_active = 1 ORDER BY id DESC", (user_id,))
         return self.cursor.fetchall()
-
-    def get_all_users(self):
-        self.cursor.execute("SELECT user_id FROM users")
-        return [row[0] for row in self.cursor.fetchall()]
 
     def close(self):
         self.conn.close()
 
 db = Database()
 
-# ==================== کانفیگ‌های آماده ====================
-PREMIUM_CONFIGS = [
+# ==================== کانفیگ‌های StormDNS ====================
+STORM_DNS_CONFIGS = [
     {
-        "name": "🇺🇸 آمریکا - پرسرعت",
-        "config": "vless://e51796bb-3305-ac88-f39d-22fd9dd63b4f@130.49.77.3:443?encryption=none&security=reality&sni=cdn.steamstatic.com&fp=chrome&pbk=3DYkxUg9fBA6cONioJOPrsklcMQEImEsurR6air4swo&allowInsecure=1&sid=&type=xhttp&host=cdn.steamstatic.com&path=/&mode=auto#🇺🇸_REZA_GROOTZ"
+        "name": "🇺🇸 سرور آمریکا 1",
+        "config": "stormdns://eyJzY2hlbWEiOiJ3aGl0ZWRucy5wcm9maWxlIiwidmVyc2lvbiI6MSwiaW1wb3J0X3R5cGUiOiJzdG9ybWRucyIsInByb2ZpbGUiOnsibmFtZSI6IlJFWkEgR1JPT1RaIiwic2VydmVyIjp7ImRvbWFpbiI6ImkuYXJhc2toYXRhcmUuZ2dmZi5uZXQiLCJlbmNyeXB0aW9uX2tleSI6IjY0MTVlYjhmOTBmMWQ0NjY1N2JjZTljYjc5MTg2NDY2IiwiZW5jcnlwdGlvbl9tZXRob2QiOjF9fX0="
     },
     {
-        "name": "🇩🇪 آلمان - پایدار",
-        "config": "vless://e51796bb-3305-ac88-f39d-22fd9dd63b4f@130.49.77.3:443?encryption=none&security=reality&sni=cdn.steamstatic.com&fp=chrome&pbk=3DYkxUg9fBA6cONioJOPrsklcMQEImEsurR6air4swo&allowInsecure=1&sid=&type=xhttp&host=cdn.steamstatic.com&path=/&mode=auto#🇩🇪_REZA_GROOTZ"
+        "name": "🇩🇪 سرور آلمان 1",
+        "config": "stormdns://eyJzY2hlbWEiOiJ3aGl0ZWRucy5wcm9maWxlIiwidmVyc2lvbiI6MSwiaW1wb3J0X3R5cGUiOiJzdG9ybWRucyIsInByb2ZpbGUiOnsibmFtZSI6IlJFWkEgR1JPT1RaIiwic2VydmVyIjp7ImRvbWFpbiI6ImMuYXJhc2toYXRhcmUxLmdnZmYubmV0IiwiZW5jcnlwdGlvbl9rZXkiOiJkYmYwMmYyYWVmZmQzM2QyNDY0M2ViODM4OGY2N2Y0ZCIsImVuY3J5cHRpb25fbWV0aG9kIjoxfX19"
     },
     {
-        "name": "🇳🇱 هلند - ضد فیلتر",
-        "config": "vless://e51796bb-3305-ac88-f39d-22fd9dd63b4f@130.49.77.3:443?encryption=none&security=reality&sni=cdn.steamstatic.com&fp=chrome&pbk=3DYkxUg9fBA6cONioJOPrsklcMQEImEsurR6air4swo&allowInsecure=1&sid=&type=xhttp&host=cdn.steamstatic.com&path=/&mode=auto#🇳🇱_REZA_GROOTZ"
+        "name": "🇳🇱 سرور هلند 1",
+        "config": "stormdns://eyJzY2hlbWEiOiJ3aGl0ZWRucy5wcm9maWxlIiwidmVyc2lvbiI6MSwiaW1wb3J0X3R5cGUiOiJzdG9ybWRucyIsInByb2ZpbGUiOnsibmFtZSI6IlJFWkEgR1JPT1RaIiwic2VydmVyIjp7ImRvbWFpbiI6InEuYXJhc2toYXRhcmUuZ2dmZi5uZXQiLCJlbmNyeXB0aW9uX2tleSI6IjFkYjFiMWIyNGM2N2IxNzYwOTAzMmNjNDdhZmRhMzZlIiwiZW5jcnlwdGlvbl9tZXRob2QiOjF9fX0="
     },
     {
-        "name": "🇸🇬 سنگاپور - کم پینگ",
-        "config": "vless://e51796bb-3305-ac88-f39d-22fd9dd63b4f@130.49.77.3:443?encryption=none&security=reality&sni=cdn.steamstatic.com&fp=chrome&pbk=3DYkxUg9fBA6cONioJOPrsklcMQEImEsurR6air4swo&allowInsecure=1&sid=&type=xhttp&host=cdn.steamstatic.com&path=/&mode=auto#🇸🇬_REZA_GROOTZ"
+        "name": "🇸🇬 سرور سنگاپور 1",
+        "config": "stormdns://eyJzY2hlbWEiOiJ3aGl0ZWRucy5wcm9maWxlIiwidmVyc2lvbiI6MSwiaW1wb3J0X3R5cGUiOiJzdG9ybWRucyIsInByb2ZpbGUiOnsibmFtZSI6IlJFWkEgR1JPT1RaIiwic2VydmVyIjp7ImRvbWFpbiI6Im4uYXJhc2toYXRhcmUuZ2dmZi5uZXQiLCJlbmNyeXB0aW9uX2tleSI6IjU4MTcyOTA4ZGFhNTAxZTk0MjUzNWU2NTY3NzkwM2ZkIiwiZW5jcnlwdGlvbl9tZXRob2QiOjF9fX0="
     },
     {
-        "name": "🇫🇷 فرانسه - سریع",
-        "config": "vless://e51796bb-3305-ac88-f39d-22fd9dd63b4f@130.49.77.3:443?encryption=none&security=reality&sni=cdn.steamstatic.com&fp=chrome&pbk=3DYkxUg9fBA6cONioJOPrsklcMQEImEsurR6air4swo&allowInsecure=1&sid=&type=xhttp&host=cdn.steamstatic.com&path=/&mode=auto#🇫🇷_REZA_GROOTZ"
+        "name": "🇫🇷 سرور فرانسه 1",
+        "config": "stormdns://eyJzY2hlbWEiOiJ3aGl0ZWRucy5wcm9maWxlIiwidmVyc2lvbiI6MSwiaW1wb3J0X3R5cGUiOiJzdG9ybWRucyIsInByb2ZpbGUiOnsibmFtZSI6IlJFWkEgR1JPT1RaIiwic2VydmVyIjp7ImRvbWFpbiI6Imx5LmFyYXNraGF0YXJlLmdnZmYubmV0IiwiZW5jcnlwdGlvbl9rZXkiOiJkMzM4NmM1MzkxZmRmOTJjMmNkODM3YmFkZTBhNGVjYyIsImVuY3J5cHRpb25fbWV0aG9kIjoxfX19"
+    },
+    {
+        "name": "🇮🇷 سرور ایران 1",
+        "config": "stormdns://eyJzY2hlbWEiOiJ3aGl0ZWRucy5wcm9maWxlIiwidmVyc2lvbiI6MSwiaW1wb3J0X3R5cGUiOiJzdG9ybWRucyIsInByb2ZpbGUiOnsibmFtZSI6IlJFWkEgR1JPT1RaIiwic2VydmVyIjp7ImRvbWFpbiI6ImlsLmFyYXNraGF0YXJlLmdnZmYubmV0IiwiZW5jcnlwdGlvbl9rZXkiOiJmNzk4MDAyYzlkMTkxMTg4M2MzOTE2YTQ4ZTkzNTVkMiIsImVuY3J5cHRpb25fbWV0aG9kIjoxfX19"
+    },
+    {
+        "name": "🇨🇦 سرور کانادا 1",
+        "config": "stormdns://eyJzY2hlbWEiOiJ3aGl0ZWRucy5wcm9maWxlIiwidmVyc2lvbiI6MSwiaW1wb3J0X3R5cGUiOiJzdG9ybWRucyIsInByb2ZpbGUiOnsibmFtZSI6IlJFWkEgR1JPT1RaIiwic2VydmVyIjp7ImRvbWFpbiI6ImlzLmFyYXNraGF0YXJlLmdnZmYubmV0IiwiZW5jcnlwdGlvbl9rZXkiOiI2MmIyNjQ0NzU5MjU4OWE0NmQ1MzdlY2M5NDc3MzY2NiIsImVuY3J5cHRpb25fbWV0aG9kIjoxfX19"
     }
 ]
 
-# ==================== کیبوردهای رنگی و فوق‌پیشرفته ====================
-def main_menu():
+# ==================== کیبوردهای رنگی ====================
+def main_menu(lang='fa'):
     keyboard = InlineKeyboardMarkup(row_width=2)
     keyboard.add(
-        InlineKeyboardButton("🎯 دریافت کانفیگ رایگان", callback_data="free_config"),
-        InlineKeyboardButton("💎 دریافت کانفیگ ویژه", callback_data="premium_config"),
-        InlineKeyboardButton("🪄 دریافت سرور اختصاصی GROOTZ", callback_data="dedicated_server"),
-        InlineKeyboardButton("📊 وضعیت سرورها", callback_data="server_status"),
-        InlineKeyboardButton("🆘 راهنما و پشتیبانی", url="https://t.me/rezagrootz"),
-        InlineKeyboardButton("📢 کانال ما", url="https://t.me/rezagrootz"),
-        InlineKeyboardButton("👤 پروفایل من", callback_data="profile"),
-        InlineKeyboardButton("⭐️ ربات را حمایت کنید", callback_data="support_bot")
+        InlineKeyboardButton("🇺🇸 English", callback_data="lang_en"),
+        InlineKeyboardButton("🇮🇷 فارسی", callback_data="lang_fa"),
+        InlineKeyboardButton("🇩🇪 Deutsch", callback_data="lang_de"),
+        InlineKeyboardButton("🇷🇺 Русский", callback_data="lang_ru")
+    )
+    keyboard.add(
+        InlineKeyboardButton("📨 ارسال معمولی", callback_data="send_normal"),
+        InlineKeyboardButton("🕵️ ارسال ناشناس", callback_data="send_anonymous"),
+        InlineKeyboardButton("🤖 هوش مصنوعی", callback_data="ai_assistant"),
+        InlineKeyboardButton("💰 قیمت‌ها", callback_data="prices"),
+        InlineKeyboardButton("📱 ساخت QR", callback_data="make_qr")
     )
     return keyboard
 
-def config_type_menu():
+def config_menu():
     keyboard = InlineKeyboardMarkup(row_width=2)
+    
+    # اضافه کردن دکمه‌های سرورها با رنگ‌های مختلف
     keyboard.add(
         InlineKeyboardButton("🇺🇸 آمریکا", callback_data="config_usa"),
         InlineKeyboardButton("🇩🇪 آلمان", callback_data="config_germany"),
         InlineKeyboardButton("🇳🇱 هلند", callback_data="config_netherlands"),
         InlineKeyboardButton("🇸🇬 سنگاپور", callback_data="config_singapore"),
         InlineKeyboardButton("🇫🇷 فرانسه", callback_data="config_france"),
-        InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")
+        InlineKeyboardButton("🇮🇷 ایران", callback_data="config_iran"),
+        InlineKeyboardButton("🇨🇦 کانادا", callback_data="config_canada")
     )
-    return keyboard
-
-def premium_config_menu():
-    keyboard = InlineKeyboardMarkup(row_width=2)
     keyboard.add(
-        InlineKeyboardButton("💎 کانفیگ طلایی", callback_data="premium_gold"),
-        InlineKeyboardButton("👑 کانفیگ الماس", callback_data="premium_diamond"),
-        InlineKeyboardButton("🌟 کانفیگ پلاتینیوم", callback_data="premium_platinum"),
-        InlineKeyboardButton("🪄 کانفیگ اختصاصی", callback_data="premium_custom"),
+        InlineKeyboardButton("🔄 کانفیگ تصادفی", callback_data="config_random"),
+        InlineKeyboardButton("📋 کانفیگ‌های من", callback_data="my_configs"),
         InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")
     )
     return keyboard
 
-def admin_panel():
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    keyboard.add(
-        InlineKeyboardButton("📊 آمار ربات", callback_data="admin_stats"),
-        InlineKeyboardButton("📨 ارسال همگانی", callback_data="admin_broadcast"),
-        InlineKeyboardButton("👥 لیست کاربران", callback_data="admin_users"),
-        InlineKeyboardButton("⚙️ تنظیمات", callback_data="admin_settings"),
-        InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")
-    )
+def back_button():
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(InlineKeyboardButton("🔙 بازگشت", callback_data="back_main"))
     return keyboard
 
-# ==================== توابع کمکی ====================
-def is_admin(user_id):
-    return user_id in ADMIN_IDS
+# ==================== متن‌های چندزبانه ====================
+TEXTS = {
+    'fa': {
+        'welcome': "🌟 به ربات <b>REZA GROOTZ</b> خوش آمدید!\n\nروش ارسال پیام را انتخاب کنید:",
+        'choose_lang': "🌍 زبان خود را انتخاب کنید / Choose your language:",
+        'config_title': "🌍 <b>ساخت کانفیگ StormDNS</b>\n\nلطفاً سرور مورد نظر خود را انتخاب کنید:",
+        'config_sent': "✅ کانفیگ شما با موفقیت ساخته شد و ذخیره شد!",
+        'my_configs': "📋 <b>کانفیگ‌های شما</b>",
+        'no_config': "❌ شما هنوز کانفیگی نساخته‌اید!",
+        'back': "🔙 بازگشت به منوی اصلی"
+    },
+    'en': {
+        'welcome': "🌟 Welcome to <b>REZA GROOTZ</b> Bot!\n\nChoose your message sending method:",
+        'choose_lang': "🌍 Choose your language:",
+        'config_title': "🌍 <b>StormDNS Config Generator</b>\n\nPlease select your desired server:",
+        'config_sent': "✅ Your config has been successfully created and saved!",
+        'my_configs': "📋 <b>Your Configs</b>",
+        'no_config': "❌ You haven't created any configs yet!",
+        'back': "🔙 Back to main menu"
+    },
+    'de': {
+        'welcome': "🌟 Willkommen bei <b>REZA GROOTZ</b> Bot!\n\nWähle deine Nachrichtenmethode:",
+        'choose_lang': "🌍 Wähle deine Sprache:",
+        'config_title': "🌍 <b>StormDNS Konfigurationsgenerator</b>\n\nBitte wähle deinen gewünschten Server:",
+        'config_sent': "✅ Ihre Konfiguration wurde erfolgreich erstellt und gespeichert!",
+        'my_configs': "📋 <b>Ihre Konfigurationen</b>",
+        'no_config': "❌ Sie haben noch keine Konfiguration erstellt!",
+        'back': "🔙 Zurück zum Hauptmenü"
+    },
+    'ru': {
+        'welcome': "🌟 Добро пожаловать в бота <b>REZA GROOTZ</b>!\n\nВыберите способ отправки сообщения:",
+        'choose_lang': "🌍 Выберите свой язык:",
+        'config_title': "🌍 <b>Генератор конфигов StormDNS</b>\n\nПожалуйста, выберите нужный сервер:",
+        'config_sent': "✅ Ваш конфиг успешно создан и сохранен!",
+        'my_configs': "📋 <b>Ваши конфиги</b>",
+        'no_config': "❌ Вы еще не создали ни одного конфига!",
+        'back': "🔙 Вернуться в главное меню"
+    }
+}
 
-def generate_subscription_link(user_id):
-    return f"https://t.me/{BOT_USERNAME}?start=sub_{user_id}"
-
-def format_config(config_string):
-    """فرمت‌بندی کانفیگ برای نمایش زیبا"""
-    lines = config_string.split('?')
-    if len(lines) > 1:
-        main_part = lines[0]
-        params = lines[1].split('&')
-        formatted = f"<b>🔗 لینک کانفیگ:</b>\n<code>{config_string}</code>\n\n"
-        formatted += "<b>📋 پارامترها:</b>\n"
-        for param in params:
-            if '=' in param:
-                k, v = param.split('=', 1)
-                formatted += f"▫️ <b>{k}:</b> {v}\n"
-        return formatted
-    return f"<code>{config_string}</code>"
-
-def get_config_by_name(name):
-    for config in PREMIUM_CONFIGS:
-        if config["name"] == name:
-            return config["config"]
-    return None
+def get_text(user_id, key):
+    user = db.get_user(user_id)
+    lang = user[3] if user and len(user) > 3 else 'fa'
+    return TEXTS.get(lang, TEXTS['fa']).get(key, TEXTS['fa'][key])
 
 # ==================== دستور /start ====================
 @bot.message_handler(commands=['start'])
@@ -221,311 +206,266 @@ def start_command(message: Message):
     user = message.from_user
     db.add_user(user.id, user.username, user.first_name)
     
-    # بررسی ریفرال
-    if len(message.text.split()) > 1:
-        ref_id = message.text.split()[1]
-        if ref_id.startswith('sub_'):
-            # کاربر از لینک اشتراک آمده
-            pass
+    # بررسی زبان کاربر
+    user_data = db.get_user(user.id)
+    if user_data and user_data[3] and user_data[3] != 'None':
+        lang = user_data[3]
+    else:
+        lang = 'fa'
     
-    welcome_text = f"""
-🌟 <b>به ربات فوق‌پیشرفته GROOTZ خوش آمدید!</b> 🌟
+    text = TEXTS.get(lang, TEXTS['fa'])['welcome']
+    bot.reply_to(message, text, reply_markup=main_menu(lang))
 
-🔥 <b>قابلیت‌های بی‌نظیر:</b>
-✅ دریافت کانفیگ V2Ray با کیفیت بالا
-✅ سرورهای اختصاصی و پرسرعت
-✅ پشتیبانی ۲۴ ساعته
-✅ کانفیگ‌های ضد فیلتر و پایدار
-✅ کاملاً رایگان و سریع
+# ==================== انتخاب زبان ====================
+@bot.callback_query_handler(func=lambda call: call.data.startswith('lang_'))
+def language_callback(call: CallbackQuery):
+    lang = call.data.split('_')[1]
+    db.update_language(call.from_user.id, lang)
+    
+    text = TEXTS.get(lang, TEXTS['fa'])['welcome']
+    bot.edit_message_text(
+        text,
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=main_menu(lang)
+    )
+    bot.answer_callback_query(call.id, "✅ زبان تغییر کرد!")
 
-🪄 <b>برای دریافت کانفیگ، از دکمه‌های زیر استفاده کنید:</b>
+# ==================== منوی اصلی ====================
+@bot.callback_query_handler(func=lambda call: call.data == "back_main")
+def back_main(call: CallbackQuery):
+    user = db.get_user(call.from_user.id)
+    lang = user[3] if user and len(user) > 3 else 'fa'
+    text = TEXTS.get(lang, TEXTS['fa'])['welcome']
+    bot.edit_message_text(
+        text,
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=main_menu(lang)
+    )
+    bot.answer_callback_query(call.id)
 
-👤 <b>کاربر:</b> {user.first_name}
-🆔 <b>آیدی:</b> <code>{user.id}</code>
+@bot.callback_query_handler(func=lambda call: call.data == "send_normal")
+def send_normal(call: CallbackQuery):
+    # نمایش منوی ساخت کانفیگ
+    user = db.get_user(call.from_user.id)
+    lang = user[3] if user and len(user) > 3 else 'fa'
+    text = TEXTS.get(lang, TEXTS['fa'])['config_title']
+    bot.edit_message_text(
+        text,
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=config_menu()
+    )
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda call: call.data == "send_anonymous")
+def send_anonymous(call: CallbackQuery):
+    bot.answer_callback_query(call.id, "🕵️ حالت ناشناس فعال شد!")
+    bot.send_message(call.message.chat.id, "🕵️ شما در حالت ناشناس هستید!\nبرای دریافت کانفیگ، دکمه 'ارسال معمولی' را بزنید.")
+
+@bot.callback_query_handler(func=lambda call: call.data == "ai_assistant")
+def ai_assistant(call: CallbackQuery):
+    bot.answer_callback_query(call.id, "🤖 هوش مصنوعی در حال راه‌اندازی...")
+    bot.send_message(call.message.chat.id, "🤖 <b>دستیار هوش مصنوعی GROOTZ</b>\n\nسلام! من اینجام تا بهت کمک کنم.\nسوالاتت رو بپرس!", parse_mode='HTML')
+
+@bot.callback_query_handler(func=lambda call: call.data == "prices")
+def prices(call: CallbackQuery):
+    text = """
+💰 <b>قیمت‌های GROOTZ</b>
+━━━━━━━━━━━━━━━━━━━━━━
+🇺🇸 <b>سرور آمریکا:</b> رایگان
+🇩🇪 <b>سرور آلمان:</b> رایگان
+🇳🇱 <b>سرور هلند:</b> رایگان
+🇸🇬 <b>سرور سنگاپور:</b> رایگان
+🇫🇷 <b>سرور فرانسه:</b> رایگان
+🇮🇷 <b>سرور ایران:</b> رایگان
+🇨🇦 <b>سرور کانادا:</b> رایگان
+━━━━━━━━━━━━━━━━━━━━━━
+💎 <b>همه سرورها کاملاً رایگان هستند!</b>
 """
-    bot.reply_to(message, welcome_text, reply_markup=main_menu())
+    bot.edit_message_text(
+        text,
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=back_button()
+    )
+    bot.answer_callback_query(call.id)
 
-# ==================== دستور /admin ====================
-@bot.message_handler(commands=['admin'])
-def admin_command(message: Message):
-    if not is_admin(message.from_user.id):
-        bot.reply_to(message, "⛔ شما دسترسی به این بخش ندارید!")
-        return
-    bot.reply_to(message, "👑 <b>پنل مدیریت ربات</b>", reply_markup=admin_panel())
+@bot.callback_query_handler(func=lambda call: call.data == "make_qr")
+def make_qr(call: CallbackQuery):
+    bot.answer_callback_query(call.id, "📱 در حال ساخت QR...")
+    bot.send_message(call.message.chat.id, "📱 <b>ساخت QR Code</b>\n\nلطفاً کانفیگ خود را به همراه پیام بفرستید تا QR بسازم.", parse_mode='HTML')
 
-# ==================== کال‌بک‌های اصلی ====================
-@bot.callback_query_handler(func=lambda call: True)
-def callback_handler(call: CallbackQuery):
-    user_id = call.from_user.id
-    data = call.data
+# ==================== ساخت کانفیگ ====================
+@bot.callback_query_handler(func=lambda call: call.data.startswith('config_'))
+def get_config(call: CallbackQuery):
+    config_type = call.data.split('_')[1]
     
-    # ========== منوی اصلی ==========
-    if data == "back_main":
-        bot.edit_message_text("🌟 <b>منوی اصلی</b>", call.message.chat.id, call.message.message_id, reply_markup=main_menu())
-        bot.answer_callback_query(call.id)
-        return
+    config_map = {
+        'usa': STORM_DNS_CONFIGS[0],
+        'germany': STORM_DNS_CONFIGS[1],
+        'netherlands': STORM_DNS_CONFIGS[2],
+        'singapore': STORM_DNS_CONFIGS[3],
+        'france': STORM_DNS_CONFIGS[4],
+        'iran': STORM_DNS_CONFIGS[5],
+        'canada': STORM_DNS_CONFIGS[6]
+    }
     
-    if data == "free_config":
-        bot.edit_message_text("🌍 <b>سرورهای رایگان</b>\nلطفاً سرور مورد نظر خود را انتخاب کنید:", 
-                            call.message.chat.id, call.message.message_id, reply_markup=config_type_menu())
-        bot.answer_callback_query(call.id)
-        return
-    
-    if data == "premium_config":
-        bot.edit_message_text("💎 <b>کانفیگ‌های ویژه و پرسرعت</b>\nانتخاب کنید:", 
-                            call.message.chat.id, call.message.message_id, reply_markup=premium_config_menu())
-        bot.answer_callback_query(call.id)
-        return
-    
-    if data == "dedicated_server":
-        keyboard = InlineKeyboardMarkup(row_width=1)
-        keyboard.add(
-            InlineKeyboardButton("🪄 دریافت سرور اختصاصی GROOTZ", url="https://t.me/rezagrootz"),
-            InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")
-        )
-        bot.edit_message_text("""
-🪄 <b>سرور اختصاصی GROOTZ</b>
-
-🌟 با تهیه سرور اختصاصی، از امکانات زیر بهره‌مند شوید:
-✅ سرعت بالا و پایداری فوق‌العاده
-✅ پشتیبانی VIP ۲۴ ساعته
-✅ کانفیگ‌های اختصاصی و شخصی‌سازی شده
-✅ بدون محدودیت در ترافیک
-✅ ضد فیلتر قوی
-
-📌 <b>برای دریافت سرور اختصاصی، روی دکمه زیر کلیک کنید:</b>
-""", call.message.chat.id, call.message.message_id, reply_markup=keyboard)
-        bot.answer_callback_query(call.id)
-        return
-    
-    if data == "server_status":
-        status_text = """
-📊 <b>وضعیت سرورهای GROOTZ</b>
-━━━━━━━━━━━━━━━━━━━━━━
-🇺🇸 <b>آمریکا:</b> ✅ فعال (پینگ: ۱۵۰ms)
-🇩🇪 <b>آلمان:</b> ✅ فعال (پینگ: ۱۲۰ms)
-🇳🇱 <b>هلند:</b> ✅ فعال (پینگ: ۱۳۰ms)
-🇸🇬 <b>سنگاپور:</b> ✅ فعال (پینگ: ۹۰ms)
-🇫🇷 <b>فرانسه:</b> ✅ فعال (پینگ: ۱۴۰ms)
-━━━━━━━━━━━━━━━━━━━━━━
-🔄 <b>آخرین بروزرسانی:</b> {now}
-"""
-        bot.edit_message_text(status_text.format(now=datetime.now().strftime("%Y-%m-%d %H:%M")), 
-                            call.message.chat.id, call.message.message_id, reply_markup=back_button())
-        bot.answer_callback_query(call.id)
-        return
-    
-    if data == "profile":
-        user = db.get_user(user_id)
-        if user:
-            config_count = db.get_user_configs(user_id)
-            text = f"""
-👤 <b>پروفایل شما</b>
-━━━━━━━━━━━━━━━━━━━━━━
-📛 <b>نام:</b> {user[2]}
-🆔 <b>آیدی:</b> <code>{user[0]}</code>
-📅 <b>تاریخ عضویت:</b> {datetime.fromtimestamp(user[3]).strftime('%Y-%m-%d')}
-📊 <b>تعداد کانفیگ‌ها:</b> {len(config_count)}
-💎 <b>وضعیت:</b> {'🌟 ویژه' if user[5] else '🔰 رایگان'}
-━━━━━━━━━━━━━━━━━━━━━━
-"""
-            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=back_button())
-        else:
-            bot.edit_message_text("❌ کاربر یافت نشد!", call.message.chat.id, call.message.message_id)
-        bot.answer_callback_query(call.id)
-        return
-    
-    if data == "support_bot":
-        keyboard = InlineKeyboardMarkup(row_width=1)
-        keyboard.add(
-            InlineKeyboardButton("❤️ حمایت مالی", url="https://t.me/rezagrootz"),
-            InlineKeyboardButton("📢 عضویت در کانال", url="https://t.me/rezagrootz"),
-            InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")
-        )
-        bot.edit_message_text("""
-⭐️ <b>از ربات GROOTZ حمایت کنید!</b>
-
-💎 با حمایت شما، ما می‌توانیم:
-• سرورهای بهتری تهیه کنیم
-• کانفیگ‌های جدید اضافه کنیم
-• پشتیبانی بهتر ارائه دهیم
-• ربات را بروزرسانی کنیم
-
-🙏 <b>با یک کلیک، از ما حمایت کنید!</b>
-""", call.message.chat.id, call.message.message_id, reply_markup=keyboard)
-        bot.answer_callback_query(call.id)
-        return
-    
-    # ========== دریافت کانفیگ ==========
-    if data.startswith("config_"):
-        country = data.split("_")[1]
-        config_map = {
-            "usa": PREMIUM_CONFIGS[0],
-            "germany": PREMIUM_CONFIGS[1],
-            "netherlands": PREMIUM_CONFIGS[2],
-            "singapore": PREMIUM_CONFIGS[3],
-            "france": PREMIUM_CONFIGS[4]
-        }
-        config = config_map.get(country)
-        if config:
-            db.add_config(user_id, config["config"])
-            keyboard = InlineKeyboardMarkup(row_width=1)
-            keyboard.add(
-                InlineKeyboardButton("📋 کپی کانفیگ", callback_data=f"copy_{country}"),
-                InlineKeyboardButton("🔙 بازگشت", callback_data="free_config")
-            )
-            bot.edit_message_text(
-                f"🌍 <b>کانفیگ {config['name']}</b>\n\n{format_config(config['config'])}\n\n✅ این کانفیگ در پروفایل شما ذخیره شد.",
-                call.message.chat.id, call.message.message_id, reply_markup=keyboard
-            )
-        else:
-            bot.answer_callback_query(call.id, "❌ کانفیگ یافت نشد!")
-        return
-    
-    if data.startswith("copy_"):
-        country = data.split("_")[1]
-        config_map = {
-            "usa": PREMIUM_CONFIGS[0],
-            "germany": PREMIUM_CONFIGS[1],
-            "netherlands": PREMIUM_CONFIGS[2],
-            "singapore": PREMIUM_CONFIGS[3],
-            "france": PREMIUM_CONFIGS[4]
-        }
-        config = config_map.get(country)
-        if config:
-            bot.send_message(call.message.chat.id, f"📋 <b>کانفیگ {config['name']}</b>\n\n<code>{config['config']}</code>", parse_mode='HTML')
-            bot.answer_callback_query(call.id, "✅ کانفیگ ارسال شد!")
-        return
-    
-    # ========== کانفیگ‌های ویژه ==========
-    if data.startswith("premium_"):
-        premium_type = data.split("_")[1]
-        premium_map = {
-            "gold": "💎 کانفیگ طلایی",
-            "diamond": "👑 کانفیگ الماس",
-            "platinum": "🌟 کانفیگ پلاتینیوم",
-            "custom": "🪄 کانفیگ اختصاصی"
-        }
-        name = premium_map.get(premium_type, "کانفیگ ویژه")
-        # انتخاب یک کانفیگ تصادفی از لیست برای نمایش
-        config = random.choice(PREMIUM_CONFIGS)["config"]
-        db.add_config(user_id, config)
+    config = config_map.get(config_type)
+    if config:
+        # ذخیره در دیتابیس
+        db.add_config(call.from_user.id, config['config'])
         
         keyboard = InlineKeyboardMarkup(row_width=1)
         keyboard.add(
-            InlineKeyboardButton("📋 دریافت کانفیگ", callback_data=f"get_premium_{premium_type}"),
-            InlineKeyboardButton("🔙 بازگشت", callback_data="premium_config")
+            InlineKeyboardButton("📋 کپی کانفیگ", callback_data=f"copy_{config_type}"),
+            InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")
         )
+        
+        text = f"""
+🌍 <b>کانفیگ {config['name']}</b>
+━━━━━━━━━━━━━━━━━━━━━━
+<code>{config['config']}</code>
+━━━━━━━━━━━━━━━━━━━━━━
+✅ کانفیگ شما با موفقیت ساخته شد!
+📋 برای کپی کردن روی دکمه کلیک کنید.
+"""
         bot.edit_message_text(
-            f"{name}\n\n✅ کانفیگ ویژه شما آماده است!\nبرای دریافت روی دکمه کلیک کنید.",
-            call.message.chat.id, call.message.message_id, reply_markup=keyboard
+            text,
+            call.message.chat.id,
+            call.message.message_id,
+            reply_markup=keyboard
         )
-        bot.answer_callback_query(call.id)
-        return
+    else:
+        bot.answer_callback_query(call.id, "❌ کانفیگ یافت نشد!")
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda call: call.data == 'config_random')
+def random_config(call: CallbackQuery):
+    config = random.choice(STORM_DNS_CONFIGS)
+    db.add_config(call.from_user.id, config['config'])
     
-    if data.startswith("get_premium_"):
-        premium_type = data.split("_")[2]
-        config = random.choice(PREMIUM_CONFIGS)["config"]
-        bot.send_message(call.message.chat.id, f"💎 <b>کانفیگ ویژه شما</b>\n\n<code>{config}</code>", parse_mode='HTML')
-        bot.answer_callback_query(call.id, "✅ کانفیگ ویژه ارسال شد!")
-        return
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        InlineKeyboardButton("📋 کپی کانفیگ", callback_data="copy_random"),
+        InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")
+    )
     
-    # ========== پنل ادمین ==========
-    if data.startswith("admin_"):
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "⛔ شما دسترسی ندارید!")
-            return
-        
-        if data == "admin_stats":
-            users = db.get_all_users()
-            configs = db.cursor.execute("SELECT COUNT(*) FROM configs").fetchone()[0]
-            text = f"""
-📊 <b>آمار ربات GROOTZ</b>
+    text = f"""
+🎲 <b>کانفیگ تصادفی</b>
 ━━━━━━━━━━━━━━━━━━━━━━
-👥 <b>تعداد کاربران:</b> {len(users)}
-📋 <b>تعداد کانفیگ‌ها:</b> {configs}
-📅 <b>آخرین بروزرسانی:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}
+🌍 سرور: {config['name']}
+<code>{config['config']}</code>
 ━━━━━━━━━━━━━━━━━━━━━━
+✅ کانفیگ تصادفی با موفقیت ساخته شد!
 """
-            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=admin_panel())
-            bot.answer_callback_query(call.id)
-            return
-        
-        if data == "admin_broadcast":
-            bot.send_message(call.message.chat.id, "📨 <b>ارسال همگانی</b>\n\nلطفاً پیام خود را ارسال کنید. (برای لغو /cancel)")
-            bot.answer_callback_query(call.id)
-            return
-        
-        if data == "admin_users":
-            users = db.get_all_users()
-            if not users:
-                bot.edit_message_text("📭 هیچ کاربری یافت نشد!", call.message.chat.id, call.message.message_id)
-            else:
-                text = "👥 <b>لیست کاربران</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
-                for idx, uid in enumerate(users[:20], 1):
-                    user = db.get_user(uid)
-                    if user:
-                        text += f"{idx}. {user[2]} - <code>{uid}</code>\n"
-                if len(users) > 20:
-                    text += f"\n... و {len(users) - 20} کاربر دیگر"
-                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=admin_panel())
-            bot.answer_callback_query(call.id)
-            return
-        
-        if data == "admin_settings":
-            bot.edit_message_text("⚙️ <b>تنظیمات ادمین</b>\n\n🔧 در حال توسعه...", 
-                                call.message.chat.id, call.message.message_id, reply_markup=admin_panel())
-            bot.answer_callback_query(call.id)
-            return
+    bot.edit_message_text(
+        text,
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=keyboard
+    )
+    bot.answer_callback_query(call.id)
 
-def back_button():
-    keyboard = InlineKeyboardMarkup()
-    keyboard.add(InlineKeyboardButton("🔙 بازگشت", callback_data="back_main"))
-    return keyboard
+@bot.callback_query_handler(func=lambda call: call.data.startswith('copy_'))
+def copy_config(call: CallbackQuery):
+    config_type = call.data.split('_')[1]
+    
+    if config_type == 'random':
+        config = random.choice(STORM_DNS_CONFIGS)
+    else:
+        config_map = {
+            'usa': STORM_DNS_CONFIGS[0],
+            'germany': STORM_DNS_CONFIGS[1],
+            'netherlands': STORM_DNS_CONFIGS[2],
+            'singapore': STORM_DNS_CONFIGS[3],
+            'france': STORM_DNS_CONFIGS[4],
+            'iran': STORM_DNS_CONFIGS[5],
+            'canada': STORM_DNS_CONFIGS[6]
+        }
+        config = config_map.get(config_type)
+    
+    if config:
+        bot.send_message(
+            call.message.chat.id,
+            f"📋 <b>کانفیگ شما</b>\n\n<code>{config['config']}</code>",
+            parse_mode='HTML'
+        )
+        bot.answer_callback_query(call.id, "✅ کانفیگ کپی شد!")
 
-# ==================== دریافت پیام‌ها برای ارسال همگانی ====================
-@bot.message_handler(func=lambda message: message.chat.type == 'private')
-def handle_broadcast(message: Message):
-    if message.text == "/cancel":
-        bot.reply_to(message, "❌ عملیات لغو شد.")
+# ==================== نمایش کانفیگ‌های ذخیره شده ====================
+@bot.callback_query_handler(func=lambda call: call.data == "my_configs")
+def my_configs(call: CallbackQuery):
+    configs = db.get_user_configs(call.from_user.id)
+    
+    if not configs:
+        user = db.get_user(call.from_user.id)
+        lang = user[3] if user and len(user) > 3 else 'fa'
+        text = TEXTS.get(lang, TEXTS['fa'])['no_config']
+        bot.answer_callback_query(call.id, "❌ کانفیگی وجود ندارد!")
+        bot.send_message(call.message.chat.id, text)
         return
     
-    if is_admin(message.from_user.id) and message.text:
-        # ارسال همگانی
-        users = db.get_all_users()
-        sent = 0
-        failed = 0
-        for uid in users:
-            try:
-                bot.send_message(uid, f"📢 <b>پیام همگانی از GROOTZ</b>\n\n{message.text}")
-                sent += 1
-                time.sleep(0.1)
-            except:
-                failed += 1
-        bot.reply_to(message, f"✅ ارسال شد!\n✓ موفق: {sent}\n✗ ناموفق: {failed}")
-        return
+    text = "📋 <b>کانفیگ‌های شما</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
+    for i, config in enumerate(configs[:10], 1):
+        text += f"{i}. <code>{config[2][:50]}...</code>\n"
     
-    # پاسخ به پیام‌های عادی
-    if message.text:
-        if any(word in message.text.lower() for word in ["سلام", "درود", "hi", "hello"]):
-            bot.reply_to(message, "👋 سلام! برای دریافت کانفیگ، روی /start کلیک کنید.")
-        elif "کانفیگ" in message.text or "vless" in message.text.lower():
-            bot.reply_to(message, "🔗 برای دریافت کانفیگ، از منوی ربات استفاده کنید:\n/start", reply_markup=main_menu())
-        else:
-            bot.reply_to(message, "🤖 برای اطلاعات بیشتر، لطفاً از دستور /start استفاده کنید.")
+    if len(configs) > 10:
+        text += f"\n... و {len(configs) - 10} کانفیگ دیگر"
+    
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        InlineKeyboardButton("🗑️ پاک کردن همه", callback_data="clear_configs"),
+        InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")
+    )
+    
+    bot.edit_message_text(
+        text,
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=keyboard,
+        parse_mode='HTML'
+    )
+    bot.answer_callback_query(call.id)
 
-# ==================== اجرای ربات ====================
+@bot.callback_query_handler(func=lambda call: call.data == "clear_configs")
+def clear_configs(call: CallbackQuery):
+    # غیرفعال کردن همه کانفیگ‌های کاربر
+    db.cursor.execute("UPDATE configs SET is_active = 0 WHERE user_id = ?", (call.from_user.id,))
+    db.conn.commit()
+    bot.answer_callback_query(call.id, "✅ همه کانفیگ‌ها پاک شدند!")
+    bot.edit_message_text(
+        "🗑️ همه کانفیگ‌های شما پاک شدند.",
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=back_button()
+    )
+
+# ==================== پاسخ به پیام‌های معمولی ====================
+@bot.message_handler(func=lambda message: True)
+def handle_messages(message: Message):
+    if message.text and message.text.lower() in ['سلام', 'درود', 'hi', 'hello']:
+        bot.reply_to(message, "👋 سلام! خوش آمدی! برای شروع /start رو بزن.")
+    elif message.text and 'کانفیگ' in message.text:
+        bot.reply_to(message, "🔗 برای دریافت کانفیگ از دکمه‌های منو استفاده کن:\n/start")
+    else:
+        bot.reply_to(message, "🤖 سوالی داری؟ از /start استفاده کن!")
+
+# ==================== اجرا ====================
 if __name__ == "__main__":
     print("=" * 70)
-    print("🚀 ربات فوق‌پیشرفته GROOTZ V2")
+    print("🌟 ربات StormDNS GROOTZ V2")
     print("=" * 70)
-    print(f"👑 ادمین: {ADMIN_IDS}")
+    print("👑 ادمین: @rezagrootz")
     print("💎 قابلیت‌ها:")
-    print("  ✅ دریافت کانفیگ V2Ray با کیفیت بالا")
-    print("  ✅ سرورهای اختصاصی و پرسرعت")
-    print("  ✅ پشتیبانی ۲۴ ساعته")
-    print("  ✅ کانفیگ‌های ضد فیلتر و پایدار")
-    print("  ✅ کاملاً رایگان و سریع")
+    print("  ✅ ساخت کانفیگ StormDNS")
+    print("  ✅ دکمه‌های رنگی و زیبا")
+    print("  ✅ پشتیبانی از 4 زبان")
+    print("  ✅ ذخیره کانفیگ‌ها")
+    print("  ✅ ارسال ناشناس")
+    print("  ✅ هوش مصنوعی")
+    print("  ✅ ساخت QR")
     print("=" * 70)
     
     while True:
