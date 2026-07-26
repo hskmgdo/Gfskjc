@@ -12,7 +12,7 @@ import base64
 from datetime import datetime, timedelta
 
 # ==================== تنظیمات اولیه ====================
-BOT_TOKEN = "8810741889:AAF9h94CG7dmkvJRd3SHNH1npwezAi2wQ1A"  # توکن ربات شما
+BOT_TOKEN = "8423981755:AAFaEYzOefEaxDiuyvKKyyTJzlhDXWSqyRw"  # توکن ربات شما
 ADMIN_IDS = [8916314219]  # آیدی عددی شما
 SUPPORT_CHANNEL = "@rezagrootz"  # کانال پشتیبانی
 BOT_USERNAME = "REZA_GROOTZ_BOT"  # یوزرنیم ربات
